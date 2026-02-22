@@ -1,0 +1,2951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JavaGoat - Video Sharing Platform</title>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Material Symbols -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0" />
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Firebase SDK v10.11.1 -->
+    <script type="module">
+        // Import the functions you need from the SDKs you need
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-auth.js";
+        import { getDatabase, ref, get, set, push, update, remove, onValue, runTransaction } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-database.js";
+        
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDd5tG6q7J8Z4d3J4XbY8e0Z7Q7W8Z4d3J4XbY8e0Z7Q7",
+            authDomain: "javagoat-demo.firebaseapp.com",
+            databaseURL: "https://javagoat-demo-default-rtdb.firebaseio.com",
+            projectId: "javagoat-demo",
+            storageBucket: "javagoat-demo.firebasestorage.app",
+            messagingSenderId: "1234567890",
+            appId: "1:1234567890:web:abcdef1234567890"
+        };
+        
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth();
+        const db = getDatabase();
+        
+        // Global variables
+        let user = null;
+        let allVideos = {};
+        let currentVidId = null;
+        let currentUploader = null;
+        let isLogin = true;
+        let charts = {};
+        let studioTab = 'dashboard';
+        let currentCategory = 'All';
+        let sidebarOpen = false;
+        let mobileSearchActive = false;
+        let notifDropdownOpen = false;
+        
+        // DOM Elements
+        let homePage, watchPage, studioPage, authModal, uploadModal, analyticsModal;
+        let categoryBubbles, videoGrid, commentsList, commentsCount;
+        let subscribeBtn, likeBtn, viewsCount, videoTitle, channelName, channelAvatar;
+        let studioVideosTable, studioStats, studioSettingsForm;
+        
+        // Initialize when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize DOM elements
+            initDOMElements();
+            
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Initialize Firebase listeners
+            initFirebase();
+            
+            // Check theme preference
+            checkThemePreference();
+            
+            // Load initial data
+            loadInitialData();
+        });
+        
+        // Initialize DOM elements
+        function initDOMElements() {
+            homePage = document.getElementById('home-page');
+            watchPage = document.getElementById('watch-page');
+            studioPage = document.getElementById('studio-page');
+            authModal = document.getElementById('auth-modal');
+            uploadModal = document.getElementById('upload-modal');
+            analyticsModal = document.getElementById('analytics-modal');
+            
+            categoryBubbles = document.getElementById('category-bubbles');
+            videoGrid = document.getElementById('video-grid');
+            commentsList = document.getElementById('comments-list');
+            commentsCount = document.getElementById('comments-count');
+            
+            subscribeBtn = document.getElementById('subscribe-btn');
+            likeBtn = document.getElementById('like-btn');
+            viewsCount = document.getElementById('views-count');
+            videoTitle = document.getElementById('video-title');
+            channelName = document.getElementById('channel-name');
+            channelAvatar = document.getElementById('channel-avatar');
+            
+            studioVideosTable = document.getElementById('studio-videos-table');
+            studioStats = document.getElementById('studio-stats');
+            studioSettingsForm = document.getElementById('studio-settings-form');
+            
+            // Initialize category bubbles
+            initCategoryBubbles();
+        }
+        
+        // Setup event listeners
+        function setupEventListeners() {
+            // Hamburger menu
+            document.getElementById('hamburger-btn').addEventListener('click', toggleSidebar);
+            
+            // Search functionality
+            const searchInput = document.getElementById('search-input');
+            searchInput.addEventListener('keyup', handleSearch);
+            document.getElementById('search-btn').addEventListener('click', handleSearch);
+            document.getElementById('mobile-search-btn').addEventListener('click', toggleMobileSearch);
+            
+            // Notification bell
+            document.getElementById('notification-btn').addEventListener('click', toggleNotif);
+            
+            // Auth modal
+            document.getElementById('auth-toggle').addEventListener('click', toggleAuthMode);
+            document.getElementById('auth-submit').addEventListener('click', performAuth);
+            document.getElementById('google-login').addEventListener('click', handleGoogleLogin);
+            
+            // Upload functionality
+            document.getElementById('upload-btn').addEventListener('click', handleUploadClick);
+            document.getElementById('upload-submit').addEventListener('click', submitVideoForm);
+            
+            // Studio navigation
+            document.getElementById('studio-dashboard').addEventListener('click', () => switchStudioTab('dashboard'));
+            document.getElementById('studio-settings').addEventListener('click', () => switchStudioTab('settings'));
+            document.getElementById('studio-exit').addEventListener('click', closeStudio);
+            
+            // Studio settings
+            document.getElementById('theme-select').addEventListener('change', (e) => applyTheme(e.target.value));
+            document.getElementById('save-settings').addEventListener('click', handleProfileUpdate);
+            
+            // Video actions
+            if (subscribeBtn) subscribeBtn.addEventListener('click', () => toggleSubscribe(currentUploader));
+            if (likeBtn) likeBtn.addEventListener('click', () => toggleLike(currentVidId));
+            
+            // Comment functionality
+            document.getElementById('comment-btn').addEventListener('click', postComment);
+            
+            // Back button in watch page
+            document.getElementById('back-btn').addEventListener('click', closeWatch);
+            
+            // Analytics
+            document.getElementById('view-analytics').addEventListener('click', openChannelAnalytics);
+            document.getElementById('close-analytics').addEventListener('click', closeAnalytics);
+            
+            // Window click for closing modals
+            window.onclick = (e) => {
+                if (e.target.classList.contains('modal-wrap')) closeModals();
+            };
+        }
+        
+        // Initialize Firebase listeners
+        function initFirebase() {
+            const auth = getAuth();
+            
+            // Auth state listener
+            onAuthStateChanged(auth, (currentUser) => {
+                user = currentUser;
+                updateAuthUI();
+                if (user) {
+                    loadSidebarSubscriptions(user.uid);
+                    if (currentVidId) {
+                        updateLikeButton(currentVidId);
+                        checkSubscriptionStatus(currentUploader);
+                    }
+                }
+            });
+            
+            // Videos listener
+            const videosRef = ref(db, 'videos');
+            onValue(videosRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    allVideos = snapshot.val();
+                    renderGrid(Object.values(allVideos));
+                } else {
+                    allVideos = {};
+                    videoGrid.innerHTML = '<div class="empty-state">No videos found</div>';
+                }
+            });
+        }
+        
+        // Check theme preference
+        function checkThemePreference() {
+            if (localStorage.getItem('theme') === 'dark') {
+                document.body.classList.add('dark-mode');
+            }
+        }
+        
+        // Load initial data
+        function loadInitialData() {
+            // Simulate initial data for demo
+            if (Object.keys(allVideos).length === 0) {
+                simulateInitialData();
+            }
+        }
+        
+        // Simulate initial data for demo
+        function simulateInitialData() {
+            const videosRef = ref(db, 'videos');
+            
+            // Create some demo videos
+            const demoVideos = [
+                {
+                    title: "Java 21 New Features Explained",
+                    thumbnail: "https://i.ytimg.com/vi/1qf-8nqQY4Q/maxresdefault.jpg",
+                    videoUrl: "https://www.youtube.com/embed/1qf-8nqQY4Q",
+                    duration: "12:45",
+                    description: "Learn about the latest features in Java 21 including virtual threads, pattern matching, and more!",
+                    uploader: "Java Master",
+                    uid: "demo1",
+                    views: 15400,
+                    timestamp: Date.now() - 3600000
+                },
+                {
+                    title: "Building REST APIs with Spring Boot",
+                    thumbnail: "https://i.ytimg.com/vi/65BqLm6a5_s/maxresdefault.jpg",
+                    videoUrl: "https://www.youtube.com/embed/65BqLm6a5_s",
+                    duration: "18:32",
+                    description: "Step-by-step guide to creating robust RESTful services using Spring Boot.",
+                    uploader: "Spring Guru",
+                    uid: "demo2",
+                    views: 28700,
+                    timestamp: Date.now() - 7200000
+                },
+                {
+                    title: "JavaScript Promises Made Simple",
+                    thumbnail: "https://i.ytimg.com/vi/5f7BrixmKIQ/maxresdefault.jpg",
+                    videoUrl: "https://www.youtube.com/embed/5f7BrixmKIQ",
+                    duration: "10:15",
+                    description: "Understand JavaScript Promises with practical examples and clear explanations.",
+                    uploader: "Web Dev Simplified",
+                    uid: "demo3",
+                    views: 42500,
+                    timestamp: Date.now() - 10800000
+                },
+                {
+                    title: "Python Data Science Tutorial",
+                    thumbnail: "https://i.ytimg.com/vi/JP7oj000z_k/maxresdefault.jpg",
+                    videoUrl: "https://www.youtube.com/embed/JP7oj000z_k",
+                    duration: "24:18",
+                    description: "Complete guide to data analysis with Pandas, NumPy, and Matplotlib.",
+                    uploader: "Data School",
+                    uid: "demo4",
+                    views: 36800,
+                    timestamp: Date.now() - 14400000
+                },
+                {
+                    title: "Game Development with Unity",
+                    thumbnail: "https://i.ytimg.com/vi/0j9qy8i4q2Q/maxresdefault.jpg",
+                    videoUrl: "https://www.youtube.com/embed/0j9qy8i4q2Q",
+                    duration: "32:40",
+                    description: "Create your first 3D game in Unity with C# programming.",
+                    uploader: "Game Dev Academy",
+                    uid: "demo5",
+                    views: 21900,
+                    timestamp: Date.now() - 18000000
+                },
+                {
+                    title: "Machine Learning Fundamentals",
+                    thumbnail: "https://i.ytimg.com/vi/ujTCoH21GlA/maxresdefault.jpg",
+                    videoUrl: "https://www.youtube.com/embed/ujTCoH21GlA",
+                    duration: "27:55",
+                    description: "Introduction to machine learning concepts and algorithms.",
+                    uploader: "AI Explained",
+                    uid: "demo6",
+                    views: 54200,
+                    timestamp: Date.now() - 21600000
+                }
+            ];
+            
+            // Push demo videos to database
+            demoVideos.forEach(video => {
+                push(videosRef, video);
+            });
+        }
+        
+        // ========== UI FUNCTIONS ==========
+        
+        function updateAuthUI() {
+            const authBtn = document.getElementById('auth-btn');
+            const avatar = document.getElementById('user-avatar');
+            const signOutBtn = document.getElementById('sign-out-btn');
+            const uploadBtn = document.getElementById('upload-btn');
+            const studioLink = document.getElementById('studio-link');
+            
+            if (user) {
+                // Authenticated state
+                authBtn.style.display = 'none';
+                avatar.style.display = 'flex';
+                
+                // Set avatar text
+                if (user.displayName) {
+                    avatar.textContent = user.displayName.charAt(0).toUpperCase();
+                } else {
+                    avatar.textContent = user.email.charAt(0).toUpperCase();
+                }
+                
+                // Show upload button and studio link
+                uploadBtn.style.display = 'flex';
+                studioLink.style.display = 'block';
+                signOutBtn.style.display = 'block';
+            } else {
+                // Unauthenticated state
+                authBtn.style.display = 'flex';
+                avatar.style.display = 'none';
+                uploadBtn.style.display = 'none';
+                studioLink.style.display = 'none';
+                signOutBtn.style.display = 'none';
+                
+                // Reset watch page actions
+                if (subscribeBtn) {
+                    subscribeBtn.textContent = 'Subscribe';
+                    subscribeBtn.classList.remove('subscribed');
+                    subscribeBtn.style.backgroundColor = 'var(--black)';
+                    subscribeBtn.style.color = 'var(--bg-body)';
+                    subscribeBtn.style.boxShadow = '0 4px 10px rgba(0,0,0,0.15)';
+                }
+                
+                if (likeBtn) {
+                    likeBtn.innerHTML = '<span class="material-symbols-rounded">thumb_up</span> 0';
+                    likeBtn.classList.remove('active');
+                }
+            }
+        }
+        
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebarOpen = !sidebarOpen;
+            
+            if (sidebarOpen) {
+                sidebar.classList.add('open');
+                document.body.style.overflow = 'hidden';
+            } else {
+                sidebar.classList.remove('open');
+                document.body.style.overflow = 'auto';
+            }
+        }
+        
+        function toggleMobileSearch() {
+            const navbar = document.getElementById('navbar');
+            mobileSearchActive = !mobileSearchActive;
+            
+            if (mobileSearchActive) {
+                navbar.classList.add('search-active');
+                document.getElementById('mobile-search-input').focus();
+            } else {
+                navbar.classList.remove('search-active');
+            }
+        }
+        
+        function toggleNotif() {
+            const notifDropdown = document.getElementById('notification-dropdown');
+            notifDropdownOpen = !notifDropdownOpen;
+            
+            if (notifDropdownOpen) {
+                notifDropdown.style.display = 'block';
+                document.getElementById('notification-badge').style.display = 'none';
+            } else {
+                notifDropdown.style.display = 'none';
+            }
+        }
+        
+        function openAuth() {
+            authModal.style.display = 'flex';
+            isLogin = true;
+            updateAuthModal();
+        }
+        
+        function closeModals() {
+            authModal.style.display = 'none';
+            uploadModal.style.display = 'none';
+            analyticsModal.style.display = 'none';
+        }
+        
+        function toggleAuthMode() {
+            isLogin = !isLogin;
+            updateAuthModal();
+        }
+        
+        function updateAuthModal() {
+            const modalTitle = document.getElementById('auth-modal-title');
+            const authSubmit = document.getElementById('auth-submit');
+            const toggleLink = document.getElementById('auth-toggle');
+            
+            if (isLogin) {
+                modalTitle.textContent = 'Sign In';
+                authSubmit.textContent = 'Sign In';
+                toggleLink.textContent = 'Create an account';
+            } else {
+                modalTitle.textContent = 'Register';
+                authSubmit.textContent = 'Register';
+                toggleLink.textContent = 'Sign In';
+            }
+        }
+        
+        function handleUploadClick() {
+            if (!user) {
+                openAuth();
+                return;
+            }
+            
+            // Reset form
+            document.getElementById('video-id').value = '';
+            document.getElementById('video-title').value = '';
+            document.getElementById('thumbnail-url').value = '';
+            document.getElementById('video-url').value = '';
+            document.getElementById('video-duration').value = '';
+            document.getElementById('video-description').value = '';
+            
+            uploadModal.style.display = 'flex';
+        }
+        
+        function openWatch(videoId) {
+            const video = allVideos[videoId];
+            if (!video) return;
+            
+            currentVidId = videoId;
+            currentUploader = video.uploader;
+            
+            // Update watch page
+            document.getElementById('player-iframe').src = video.videoUrl + '?autoplay=1';
+            videoTitle.textContent = video.title;
+            document.getElementById('video-meta').textContent = `${formatViews(video.views)} views • ${timeAgo(video.timestamp)}`;
+            document.getElementById('description-text').textContent = video.description;
+            viewsCount.textContent = formatViews(video.views);
+            
+            // Channel info
+            channelName.textContent = video.uploader;
+            channelAvatar.textContent = video.uploader.charAt(0).toUpperCase();
+            
+            // Update subscription status
+            if (user) {
+                checkSubscriptionStatus(video.uploader);
+            }
+            
+            // Update like button
+            updateLikeButton(videoId);
+            
+            // Load comments
+            loadComments(videoId);
+            
+            // Increment view count
+            incrementViewCount(videoId);
+            
+            // Add to history if logged in
+            if (user) {
+                addToHistory(videoId);
+            }
+            
+            // Hide home page, show watch page
+            homePage.style.display = 'none';
+            watchPage.style.display = 'block';
+            
+            // Hide category bubbles
+            document.getElementById('category-bubbles-container').style.display = 'none';
+        }
+        
+        function closeWatch() {
+            // Stop video playback
+            document.getElementById('player-iframe').src = '';
+            
+            // Hide watch page, show home page
+            watchPage.style.display = 'none';
+            homePage.style.display = 'block';
+            
+            // Show category bubbles
+            document.getElementById('category-bubbles-container').style.display = 'flex';
+            
+            currentVidId = null;
+        }
+        
+        function openStudio() {
+            if (!user) {
+                openAuth();
+                return;
+            }
+            
+            studioPage.style.display = 'flex';
+            homePage.style.display = 'none';
+            
+            // Hide category bubbles
+            document.getElementById('category-bubbles-container').style.display = 'none';
+            
+            // Load studio data
+            loadStudioData();
+        }
+        
+        function closeStudio() {
+            studioPage.style.display = 'none';
+            homePage.style.display = 'block';
+            
+            // Show category bubbles
+            document.getElementById('category-bubbles-container').style.display = 'flex';
+        }
+        
+        function switchStudioTab(tab) {
+            studioTab = tab;
+            document.getElementById('studio-dashboard').classList.toggle('active', tab === 'dashboard');
+            document.getElementById('studio-settings').classList.toggle('active', tab === 'settings');
+            
+            document.getElementById('studio-dashboard-content').style.display = tab === 'dashboard' ? 'block' : 'none';
+            document.getElementById('studio-settings-content').style.display = tab === 'settings' ? 'block' : 'none';
+            
+            if (tab === 'dashboard') {
+                loadStudioData();
+            } else if (tab === 'settings') {
+                loadStudioSettings();
+            }
+        }
+        
+        function openAnalytics(videoId) {
+            // Simulate analytics data
+            const viewData = generateMockAnalyticsData();
+            renderRealtimeChart(viewData.realtime);
+            renderPerformanceChart(viewData.performance);
+            
+            // Set video title
+            document.getElementById('analytics-video-title').textContent = 
+                videoId ? allVideos[videoId].title : 'Overall Performance (All Videos)';
+            
+            analyticsModal.style.display = 'flex';
+        }
+        
+        function openChannelAnalytics() {
+            openAnalytics(null);
+        }
+        
+        function closeAnalytics() {
+            analyticsModal.style.display = 'none';
+            
+            // Destroy charts
+            if (charts.realtime) charts.realtime.destroy();
+            if (charts.perf) charts.perf.destroy();
+        }
+        
+        // ========== FIREBASE FUNCTIONS ==========
+        
+        function performAuth() {
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            
+            if (!email || !password) {
+                alert('Please enter both email and password');
+                return;
+            }
+            
+            if (isLogin) {
+                signInWithEmailAndPassword(auth, email, password)
+                    .then(() => {
+                        closeModals();
+                    })
+                    .catch((error) => {
+                        alert('Error signing in: ' + error.message);
+                    });
+            } else {
+                createUserWithEmailAndPassword(auth, email, password)
+                    .then(() => {
+                        closeModals();
+                    })
+                    .catch((error) => {
+                        alert('Error creating account: ' + error.message);
+                    });
+            }
+        }
+        
+        function handleGoogleLogin() {
+            const provider = new GoogleAuthProvider();
+            signInWithPopup(auth, provider)
+                .then((result) => {
+                    // Update user profile with Google data
+                    const user = result.user;
+                    updateProfile(user, {
+                        displayName: user.displayName,
+                        photoURL: user.photoURL
+                    }).then(() => {
+                        closeModals();
+                    });
+                })
+                .catch((error) => {
+                    alert('Google sign in failed: ' + error.message);
+                });
+        }
+        
+        function handleLogout() {
+            if (confirm('Logout?')) {
+                signOut(auth).then(() => {
+                    // UI updates handled by auth state listener
+                }).catch((error) => {
+                    alert('Error signing out: ' + error.message);
+                });
+            }
+        }
+        
+        function submitVideoForm() {
+            const title = document.getElementById('video-title').value;
+            const thumbnail = document.getElementById('thumbnail-url').value;
+            const videoUrl = document.getElementById('video-url').value;
+            const duration = document.getElementById('video-duration').value;
+            const description = document.getElementById('video-description').value;
+            const videoId = document.getElementById('video-id').value;
+            
+            if (!title || !videoUrl) {
+                alert('Title and Video URL are required');
+                return;
+            }
+            
+            const videoData = {
+                title,
+                thumbnail,
+                videoUrl: convertToEmbed(videoUrl),
+                duration,
+                description,
+                uploader: user.displayName || user.email.split('@')[0],
+                uid: user.uid,
+                views: 0,
+                timestamp: Date.now()
+            };
+            
+            if (videoId) {
+                // Update existing video
+                update(ref(db, `videos/${videoId}`), videoData)
+                    .then(() => {
+                        uploadModal.style.display = 'none';
+                    })
+                    .catch((error) => {
+                        alert('Error updating video: ' + error.message);
+                    });
+            } else {
+                // Create new video
+                push(ref(db, 'videos'), videoData)
+                    .then(() => {
+                        uploadModal.style.display = 'none';
+                    })
+                    .catch((error) => {
+                        alert('Error uploading video: ' + error.message);
+                    });
+            }
+        }
+        
+        function deleteVideo(videoId) {
+            if (confirm('Delete video?')) {
+                remove(ref(db, `videos/${videoId}`))
+                    .then(() => {
+                        closeAnalytics();
+                    })
+                    .catch((error) => {
+                        alert('Error deleting video: ' + error.message);
+                    });
+            }
+        }
+        
+        function toggleLike(videoId) {
+            if (!user) {
+                openAuth();
+                return;
+            }
+            
+            const likeRef = ref(db, `likes/${videoId}/${user.uid}`);
+            get(likeRef).then((snapshot) => {
+                if (snapshot.exists()) {
+                    // User already liked, remove like
+                    remove(likeRef);
+                } else {
+                    // Add like
+                    set(likeRef, true);
+                }
+            });
+        }
+        
+        function toggleSubscribe(uploader) {
+            if (!user) {
+                openAuth();
+                return;
+            }
+            
+            if (user.displayName === uploader) {
+                alert('Cannot subscribe to yourself');
+                return;
+            }
+            
+            const subRef = ref(db, `users/${user.uid}/subscriptions/${uploader}`);
+            get(subRef).then((snapshot) => {
+                if (snapshot.exists()) {
+                    // Already subscribed, unsubscribe
+                    remove(subRef);
+                } else {
+                    // Subscribe
+                    set(subRef, true);
+                }
+            });
+        }
+        
+        function postComment() {
+            if (!user) {
+                openAuth();
+                return;
+            }
+            
+            const text = document.getElementById('comment-input').value;
+            if (!text) return;
+            
+            const commentData = {
+                text,
+                user: user.displayName || user.email.split('@')[0],
+                uid: user.uid,
+                time: Date.now()
+            };
+            
+            push(ref(db, `comments/${currentVidId}`), commentData)
+                .then(() => {
+                    document.getElementById('comment-input').value = '';
+                })
+                .catch((error) => {
+                    alert('Error posting comment: ' + error.message);
+                });
+        }
+        
+        function incrementViewCount(videoId) {
+            const viewsRef = ref(db, `videos/${videoId}/views`);
+            runTransaction(viewsRef, (currentViews) => {
+                return (currentViews || 0) + 1;
+            });
+            
+            // Log analytics
+            const viewId = Date.now();
+            set(ref(db, `analytics/${videoId}/views/${viewId}`), {
+                t: Date.now()
+            });
+        }
+        
+        function addToHistory(videoId) {
+            const historyRef = push(ref(db, `users/${user.uid}/history`));
+            set(historyRef, {
+                videoId,
+                timestamp: Date.now()
+            });
+        }
+        
+        function handleProfileUpdate() {
+            const displayName = document.getElementById('display-name').value;
+            const photoURL = document.getElementById('profile-picture').value;
+            
+            updateProfile(user, {
+                displayName,
+                photoURL
+            }).then(() => {
+                alert('Profile updated successfully!');
+            }).catch((error) => {
+                alert('Error updating profile: ' + error.message);
+            });
+        }
+        
+        // ========== UTILITY FUNCTIONS ==========
+        
+        function formatViews(n) {
+            if (n >= 1000000) {
+                return (n / 1000000).toFixed(1) + 'M';
+            } else if (n >= 1000) {
+                return (n / 1000).toFixed(1) + 'K';
+            }
+            return n;
+        }
+        
+        function timeAgo(timestamp) {
+            const seconds = Math.floor((Date.now() - timestamp) / 1000);
+            
+            if (seconds < 60) return 'Just now';
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return minutes + ' mins ago';
+            
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return hours + ' hours ago';
+            
+            const days = Math.floor(hours / 24);
+            return days + ' days ago';
+        }
+        
+        function convertToEmbed(url) {
+            // YouTube
+            const youtubeMatch = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/);
+            if (youtubeMatch && youtubeMatch[1]) {
+                return `https://www.youtube.com/embed/${youtubeMatch[1]}?autoplay=1`;
+            }
+            
+            // Google Drive
+            const driveMatch = url.match(/\/d\/(.*?)\//);
+            if (driveMatch && driveMatch[1]) {
+                return `https://drive.google.com/file/d/${driveMatch[1]}/preview`;
+            }
+            
+            return url;
+        }
+        
+        function updateLikeButton(vidId) {
+            if (!vidId) return;
+            
+            const likesRef = ref(db, `likes/${vidId}`);
+            get(likesRef).then((snapshot) => {
+                let count = 0;
+                if (snapshot.exists()) {
+                    count = Object.keys(snapshot.val()).length;
+                }
+                
+                likeBtn.innerHTML = `<span class="material-symbols-rounded">${user && snapshot.exists() && snapshot.val()[user.uid] ? 'thumb_up' : 'thumb_up_off_alt'}</span> ${count}`;
+                
+                if (user && snapshot.exists() && snapshot.val()[user.uid]) {
+                    likeBtn.classList.add('active');
+                } else {
+                    likeBtn.classList.remove('active');
+                }
+            });
+        }
+        
+        function checkSubscriptionStatus(uploader) {
+            if (!user) {
+                subscribeBtn.textContent = 'Subscribe';
+                subscribeBtn.classList.remove('subscribed');
+                subscribeBtn.style.backgroundColor = 'var(--black)';
+                subscribeBtn.style.color = 'var(--bg-body)';
+                subscribeBtn.style.boxShadow = '0 4px 10px rgba(0,0,0,0.15)';
+                return;
+            }
+            
+            if (user.displayName === uploader) {
+                subscribeBtn.textContent = 'Subscribe';
+                subscribeBtn.classList.remove('subscribed');
+                subscribeBtn.style.backgroundColor = 'var(--black)';
+                subscribeBtn.style.color = 'var(--bg-body)';
+                subscribeBtn.style.boxShadow = '0 4px 10px rgba(0,0,0,0.15)';
+                return;
+            }
+            
+            const subRef = ref(db, `users/${user.uid}/subscriptions/${uploader}`);
+            get(subRef).then((snapshot) => {
+                if (snapshot.exists()) {
+                    // Subscribed
+                    subscribeBtn.textContent = 'Subscribed';
+                    subscribeBtn.classList.add('subscribed');
+                    subscribeBtn.style.backgroundColor = 'var(--secondary)';
+                    subscribeBtn.style.color = 'var(--primary-dark)';
+                    subscribeBtn.style.boxShadow = 'none';
+                    subscribeBtn.style.border = '1px solid var(--border)';
+                } else {
+                    // Not subscribed
+                    subscribeBtn.textContent = 'Subscribe';
+                    subscribeBtn.classList.remove('subscribed');
+                    subscribeBtn.style.backgroundColor = 'var(--black)';
+                    subscribeBtn.style.color = 'var(--bg-body)';
+                    subscribeBtn.style.boxShadow = '0 4px 10px rgba(0,0,0,0.15)';
+                    subscribeBtn.style.border = 'none';
+                }
+            });
+        }
+        
+        function loadSidebarSubscriptions(uid) {
+            const subsContainer = document.getElementById('subscriptions-list');
+            const subRef = ref(db, `users/${uid}/subscriptions`);
+            
+            onValue(subRef, (snapshot) => {
+                subsContainer.innerHTML = '';
+                
+                if (snapshot.exists()) {
+                    const subscriptions = snapshot.val();
+                    if (Object.keys(subscriptions).length === 0) {
+                        subsContainer.innerHTML = '<div class="empty-subscription">No subscriptions yet.</div>';
+                    } else {
+                        Object.keys(subscriptions).forEach(channel => {
+                            const subItem = document.createElement('div');
+                            subItem.className = 'subscription-item';
+                            subItem.innerHTML = `
+                                <div class="channel-avatar">${channel.charAt(0).toUpperCase()}</div>
+                                <div class="channel-name">${channel}</div>
+                            `;
+                            subsContainer.appendChild(subItem);
+                        });
+                    }
+                } else {
+                    subsContainer.innerHTML = '<div class="empty-subscription">No subscriptions yet.</div>';
+                }
+            });
+        }
+        
+        function loadComments(vidId) {
+            const commentsRef = ref(db, `comments/${vidId}`);
+            onValue(commentsRef, (snapshot) => {
+                commentsList.innerHTML = '';
+                
+                if (snapshot.exists()) {
+                    const comments = snapshot.val();
+                    const commentKeys = Object.keys(comments);
+                    commentsCount.textContent = commentKeys.length + ' Comments';
+                    
+                    // Sort comments by time (newest first)
+                    commentKeys.sort((a, b) => comments[b].time - comments[a].time);
+                    
+                    commentKeys.forEach(key => {
+                        const comment = comments[key];
+                        const commentEl = document.createElement('div');
+                        commentEl.className = 'comment-item';
+                        commentEl.innerHTML = `
+                            <div class="comment-avatar">${comment.user.charAt(0).toUpperCase()}</div>
+                            <div class="comment-content">
+                                <div class="comment-meta">@${comment.user} • ${timeAgo(comment.time)}</div>
+                                <div class="comment-text">${comment.text}</div>
+                            </div>
+                        `;
+                        commentsList.appendChild(commentEl);
+                    });
+                } else {
+                    commentsCount.textContent = 'Comments';
+                    commentsList.innerHTML = '<div class="empty-state">No comments yet.</div>';
+                }
+            });
+        }
+        
+        function loadStudioData() {
+            // Simulate studio data
+            const videos = Object.values(allVideos).filter(v => v.uid === user.uid);
+            
+            // Update stats
+            const totalVideos = videos.length;
+            const totalViews = videos.reduce((sum, v) => sum + v.views, 0);
+            
+            document.getElementById('total-videos-count').textContent = totalVideos;
+            document.getElementById('total-views-count').textContent = formatViews(totalViews);
+            
+            // Render videos table
+            studioVideosTable.innerHTML = '';
+            
+            if (videos.length === 0) {
+                const emptyRow = document.createElement('tr');
+                emptyRow.innerHTML = `<td colspan="4" class="empty-state">No videos uploaded yet.</td>`;
+                studioVideosTable.appendChild(emptyRow);
+                return;
+            }
+            
+            videos.forEach(video => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>
+                        <div class="video-cell">
+                            <img src="${video.thumbnail}" alt="${video.title}" class="video-thumb">
+                            <div class="video-info">
+                                <div class="video-title">${video.title}</div>
+                                <div class="video-duration">${video.duration}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>${new Date(video.timestamp).toLocaleDateString()}</td>
+                    <td>${formatViews(video.views)}</td>
+                    <td>
+                        <div class="action-icons">
+                            <span class="material-symbols-rounded action-icon analytics" onclick="openAnalytics('${Object.keys(allVideos).find(k => allVideos[k] === video)}')">bar_chart</span>
+                            <span class="material-symbols-rounded action-icon edit" onclick="openEdit('${Object.keys(allVideos).find(k => allVideos[k] === video)}')">edit</span>
+                            <span class="material-symbols-rounded action-icon delete" onclick="deleteVideo('${Object.keys(allVideos).find(k => allVideos[k] === video)}')">delete</span>
+                        </div>
+                    </td>
+                `;
+                studioVideosTable.appendChild(row);
+            });
+        }
+        
+        function openEdit(videoId) {
+            const video = allVideos[videoId];
+            
+            // Populate form
+            document.getElementById('video-id').value = videoId;
+            document.getElementById('video-title').value = video.title;
+            document.getElementById('thumbnail-url').value = video.thumbnail;
+            document.getElementById('video-url').value = video.videoUrl;
+            document.getElementById('video-duration').value = video.duration;
+            document.getElementById('video-description').value = video.description;
+            
+            uploadModal.style.display = 'flex';
+        }
+        
+        function loadStudioSettings() {
+            if (!user) return;
+            
+            document.getElementById('display-name').value = user.displayName || '';
+            document.getElementById('profile-picture').value = user.photoURL || '';
+        }
+        
+        function handleSearch() {
+            const query = document.getElementById('search-input').value.toLowerCase();
+            const mobileQuery = document.getElementById('mobile-search-input').value.toLowerCase();
+            const searchQuery = mobileSearchActive ? mobileQuery : query;
+            
+            if (searchQuery === '') {
+                renderGrid(Object.values(allVideos));
+                return;
+            }
+            
+            const filtered = Object.values(allVideos).filter(video => 
+                video.title.toLowerCase().includes(searchQuery) || 
+                video.description.toLowerCase().includes(searchQuery)
+            );
+            
+            renderGrid(filtered);
+        }
+        
+        function initCategoryBubbles() {
+            const categories = [
+                'All', 'Music', 'Gaming', 'Code', 'News', 
+                'Sports', 'Live', 'Learning', 'Java', 'Python', 
+                'Vlogs', 'Comedy'
+            ];
+            
+            const gradients = [
+                'linear-gradient(135deg, #FF9A9E, #FECFEF)', // pink
+                'linear-gradient(135deg, #a18cd1, #fbc2eb)', // purple
+                'linear-gradient(135deg, #84fab0, #8fd3f4)', // teal
+                'linear-gradient(135deg, #cfd9df, #e2ebf0)', // gray
+                'linear-gradient(135deg, #a6c0fe, #f68084)', // blue-pink
+                'linear-gradient(135deg, #fccb90, #d57eeb)', // orange-purple
+                'linear-gradient(135deg, #e0c3fc, #8ec5fc)', // lavender
+                'linear-gradient(135deg, #f093fb, #f5576c)', // magenta
+                'linear-gradient(135deg, #4facfe, #00f2fe)', // cyan
+                'linear-gradient(135deg, #43e97b, #38f9d7)', // green
+                'linear-gradient(135deg, #FFD97D, #FF9B85)', // orange
+                'linear-gradient(135deg, #D4FC79, #96E6A1)'  // light green
+            ];
+            
+            categories.forEach((category, index) => {
+                const bubble = document.createElement('div');
+                bubble.className = 'category-bubble';
+                bubble.textContent = category;
+                bubble.dataset.category = category;
+                
+                if (category === 'All') {
+                    bubble.style.background = 'var(--black)';
+                    bubble.style.color = 'white';
+                } else {
+                    bubble.style.background = gradients[index % gradients.length];
+                    bubble.style.color = '#0f0f0f';
+                }
+                
+                if (category === currentCategory) {
+                    bubble.classList.add('active');
+                }
+                
+                bubble.addEventListener('click', () => {
+                    document.querySelectorAll('.category-bubble').forEach(b => b.classList.remove('active'));
+                    bubble.classList.add('active');
+                    currentCategory = category;
+                    
+                    if (category === 'All') {
+                        renderGrid(Object.values(allVideos));
+                    } else {
+                        const filtered = Object.values(allVideos).filter(video => 
+                            video.title.toLowerCase().includes(category.toLowerCase()) ||
+                            video.description.toLowerCase().includes(category.toLowerCase())
+                        );
+                        renderGrid(filtered);
+                    }
+                });
+                
+                categoryBubbles.appendChild(bubble);
+            });
+        }
+        
+        function renderGrid(videos) {
+            videoGrid.innerHTML = '';
+            
+            if (videos.length === 0) {
+                videoGrid.innerHTML = '<div class="empty-state">No videos found for this category</div>';
+                return;
+            }
+            
+            videos.forEach(video => {
+                const videoId = Object.keys(allVideos).find(key => allVideos[key] === video);
+                const card = document.createElement('div');
+                card.className = 'video-card';
+                card.innerHTML = `
+                    <div class="thumbnail-container">
+                        <img src="${video.thumbnail}" alt="${video.title}" class="thumbnail">
+                        <div class="duration-badge">${video.duration}</div>
+                    </div>
+                    <div class="video-meta">
+                        <div class="channel-avatar">${video.uploader.charAt(0).toUpperCase()}</div>
+                        <div class="video-info">
+                            <h3 class="video-title">${video.title}</h3>
+                            <div class="channel-name">${video.uploader}</div>
+                            <div class="stats">${formatViews(video.views)} views • ${timeAgo(video.timestamp)}</div>
+                        </div>
+                    </div>
+                `;
+                card.addEventListener('click', () => openWatch(videoId));
+                videoGrid.appendChild(card);
+            });
+        }
+        
+        function renderRealtimeChart(data) {
+            const ctx = document.getElementById('realtime-chart').getContext('2d');
+            
+            // Destroy existing chart if exists
+            if (charts.realtime) {
+                charts.realtime.destroy();
+            }
+            
+            charts.realtime = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.labels,
+                    datasets: [{
+                        label: 'Views',
+                        data: data.values,
+                        backgroundColor: '#00c851',
+                        borderRadius: 4,
+                        barPercentage: 0.6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            display: false,
+                            beginAtZero: true
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function renderPerformanceChart(data) {
+            const ctx = document.getElementById('performance-chart').getContext('2d');
+            
+            // Destroy existing chart if exists
+            if (charts.perf) {
+                charts.perf.destroy();
+            }
+            
+            charts.perf = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.labels,
+                    datasets: [{
+                        label: 'Views',
+                        data: data.values,
+                        borderColor: '#065fd4',
+                        backgroundColor: 'rgba(6, 95, 212, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            grid: {
+                                color: 'rgba(0,0,0,0.05)'
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function generateMockAnalyticsData() {
+            // Generate last 24 hours data
+            const hours = [];
+            const values = [];
+            
+            for (let i = 23; i >= 0; i--) {
+                const hour = new Date(Date.now() - i * 3600000);
+                hours.push(hour.getHours() % 12 || 12 + (hour.getHours() >= 12 ? ' PM' : ' AM'));
+                values.push(Math.floor(Math.random() * 50));
+            }
+            
+            // Generate performance data (last 7 days)
+            const days = [];
+            const dailyValues = [];
+            let cumulative = 0;
+            
+            for (let i = 6; i >= 0; i--) {
+                const day = new Date(Date.now() - i * 86400000);
+                days.push(day.toLocaleDateString('en-US', { weekday: 'short' }));
+                const daily = Math.floor(Math.random() * 100);
+                cumulative += daily;
+                dailyValues.push(cumulative);
+            }
+            
+            return {
+                realtime: {
+                    labels: hours,
+                    values: values
+                },
+                performance: {
+                    labels: days,
+                    values: dailyValues
+                }
+            };
+        }
+        
+        function applyTheme(theme) {
+            if (theme === 'dark') {
+                document.body.classList.add('dark-mode');
+                localStorage.setItem('theme', 'dark');
+            } else {
+                document.body.classList.remove('dark-mode');
+                localStorage.setItem('theme', 'light');
+            }
+        }
+    </script>
+    
+    <style>
+        /* ===== CSS VARIABLES ===== */
+        :root {
+            /* Light Mode Colors */
+            --primary: #3ea6ff;
+            --primary-dark: #065fd4;
+            --secondary: #eef4ff;
+            --accent-red: #ff4e45;
+            --accent-green: #00c851;
+            --accent-purple: #a855f7;
+            --accent-yellow: #ffbb33;
+            --accent-orange: #ff8800;
+            --white: #ffffff;
+            --black: #0f0f0f;
+            --text-main: #222222;
+            --text-light: #606060;
+            --border: #e0e0e0;
+            --bg-body: #f9f9f9;
+            --nav-bg: rgba(255, 255, 255, 0.95);
+            --studio-bg: #f4f6f8;
+            --card-gradient: linear-gradient(135deg, #ffffff, #fff176);
+            --card-border-hover: rgba(255, 235, 59, 0.5);
+            
+            /* Layout Constants */
+            --header-h: 64px;
+            --sidebar-w: 250px;
+            --grid-gap: 24px;
+            --max-content-w: 1100px;
+            
+            /* Box Shadows */
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.1);
+        }
+        
+        body.dark-mode {
+            /* Dark Mode Colors */
+            --primary: #3ea6ff;
+            --primary-dark: #6ab5ff;
+            --secondary: #262626;
+            --accent-red: #ff4e45;
+            --accent-green: #00c851;
+            --accent-purple: #a855f7;
+            --accent-yellow: #ffbb33;
+            --accent-orange: #ff8800;
+            --white: #1f1f1f;
+            --black: #ffffff;
+            --text-main: #f1f1f1;
+            --text-light: #aaaaaa;
+            --border: #333333;
+            --bg-body: #0f0f0f;
+            --nav-bg: rgba(20, 20, 20, 0.95);
+            --studio-bg: #121212;
+            --card-gradient: linear-gradient(135deg, #1e1e1e, #4a3b00);
+            --card-border-hover: rgba(255, 215, 0, 0.3);
+        }
+        
+        /* ===== BASE STYLES ===== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            transition: background-color 0.3s, color 0.3s;
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+        
+        h1, h2, h3, h4, h5, h6 {
+            font-family: 'Poppins', sans-serif;
+            font-weight: 700;
+        }
+        
+        a {
+            text-decoration: none;
+            color: inherit;
+        }
+        
+        button {
+            cursor: pointer;
+            font-family: 'Poppins', sans-serif;
+            border: none;
+            background: none;
+            outline: none;
+        }
+        
+        input, textarea {
+            font-family: 'Roboto', sans-serif;
+            outline: none;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 10px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: var(--primary);
+            border-radius: 5px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--primary-dark);
+        }
+        
+        /* ===== LAYOUT STYLES ===== */
+        .container {
+            max-width: var(--max-content-w);
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        /* ===== ANIMATIONS ===== */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes scaleUp {
+            from { transform: scale(0.8); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.2s ease forwards;
+        }
+        
+        .scale-up {
+            animation: scaleUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        
+        /* ===== NAVIGATION ===== */
+        #navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: var(--header-h);
+            background: var(--nav-bg);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        #navbar.search-active {
+            background: var(--white);
+            height: 100vh;
+            width: 100%;
+            top: 0;
+            left: 0;
+            transform: none !important;
+            z-index: 1001;
+            flex-direction: column;
+            padding: 20px;
+            box-shadow: none;
+        }
+        
+        .navbar-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-shrink: 0;
+        }
+        
+        .hamburger-btn {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 24px;
+            color: var(--text-main);
+            cursor: pointer;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'Poppins', sans-serif;
+            font-weight: 700;
+            font-size: 22px;
+            letter-spacing: -0.5px;
+            color: var(--black);
+        }
+        
+        .logo-icon {
+            color: var(--primary);
+            font-size: 34px;
+        }
+        
+        .navbar-center {
+            flex: 1;
+            max-width: 600px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+        }
+        
+        .search-container {
+            width: 100%;
+            position: relative;
+        }
+        
+        .search-input {
+            width: 100%;
+            height: 44px;
+            border-radius: 50px;
+            padding: 0 20px;
+            border: 1px solid var(--border);
+            background: var(--secondary);
+            font-size: 15px;
+            transition: all 0.2s ease;
+        }
+        
+        .search-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(62, 166, 255, 0.15);
+            background: var(--white);
+        }
+        
+        .search-btn {
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 64px;
+            height: 44px;
+            background: var(--primary);
+            border-radius: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        
+        .search-btn:hover {
+            background: var(--primary-dark);
+        }
+        
+        .navbar-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-shrink: 0;
+        }
+        
+        .mobile-search-btn {
+            display: none;
+            font-size: 24px;
+            color: var(--text-main);
+        }
+        
+        .upload-btn {
+            display: none;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: var(--accent-red);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: var(--shadow-md);
+            transition: transform 0.2s ease;
+        }
+        
+        .upload-btn:hover {
+            transform: scale(1.05);
+        }
+        
+        .notification-btn {
+            position: relative;
+            font-size: 24px;
+            color: var(--accent-yellow);
+            cursor: pointer;
+        }
+        
+        #notification-badge {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 10px;
+            height: 10px;
+            background: var(--accent-red);
+            border: 2px solid var(--white);
+            border-radius: 50%;
+            display: none;
+        }
+        
+        .notification-dropdown {
+            position: absolute;
+            top: 60px;
+            right: 70px;
+            width: 340px;
+            max-height: 400px;
+            overflow-y: auto;
+            background: var(--white);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow-md);
+            z-index: 2000;
+            display: none;
+        }
+        
+        .notif-header {
+            padding: 16px;
+            font-size: 15px;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .notif-item {
+            padding: 14px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 12px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        
+        .notif-item:hover {
+            background: var(--secondary);
+        }
+        
+        .notif-thumb {
+            width: 64px;
+            height: 36px;
+            border-radius: 6px;
+            background: #eee;
+            flex-shrink: 0;
+        }
+        
+        .notif-info {
+            flex: 1;
+        }
+        
+        .notif-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 4px;
+            display: -webkit-box;
+            -webkit-line-clamp: 1;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        .notif-uploader {
+            font-size: 12px;
+            color: var(--text-light);
+        }
+        
+        .auth-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--primary);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            transition: background 0.2s ease;
+        }
+        
+        .auth-btn:hover {
+            background: var(--primary-dark);
+        }
+        
+        .user-avatar {
+            display: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        
+        /* ===== SIDEBAR ===== */
+        #sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            width: var(--sidebar-w);
+            background: var(--white);
+            z-index: 900;
+            padding: 20px 0;
+            box-shadow: var(--shadow-md);
+            transform: translateX(-100%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow-y: auto;
+        }
+        
+        #sidebar.open {
+            transform: translateX(0);
+        }
+        
+        .sidebar-menu {
+            padding: 0 15px;
+        }
+        
+        .menu-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 15px;
+            border-radius: 12px;
+            margin-bottom: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: var(--text-main);
+            font-weight: 500;
+        }
+        
+        .menu-item:hover {
+            background: var(--secondary);
+            transform: translateY(-2px);
+        }
+        
+        .menu-item.active {
+            background: var(--secondary);
+            color: var(--primary-dark);
+        }
+        
+        .menu-item span {
+            font-size: 20px;
+        }
+        
+        .menu-divider {
+            height: 1px;
+            background: var(--border);
+            margin: 20px 0;
+        }
+        
+        .sidebar-section {
+            padding: 0 15px;
+        }
+        
+        .section-header {
+            text-transform: uppercase;
+            font-size: 15px;
+            color: var(--text-light);
+            font-weight: 600;
+            margin: 10px 0;
+        }
+        
+        .subscription-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        
+        .subscription-item:hover {
+            background: var(--secondary);
+        }
+        
+        .channel-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .channel-name {
+            font-size: 14px;
+            color: var(--text-main);
+        }
+        
+        .empty-subscription {
+            font-size: 13px;
+            color: var(--text-light);
+            padding: 8px 15px;
+        }
+        
+        /* ===== CATEGORY BUBBLES ===== */
+        #category-bubbles-container {
+            padding: 20px 0;
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+        
+        #category-bubbles {
+            display: inline-flex;
+            gap: 12px;
+            padding: 5px 0;
+        }
+        
+        .category-bubble {
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            color: white;
+        }
+        
+        .category-bubble:hover {
+            transform: translateY(-2px);
+            opacity: 0.9;
+        }
+        
+        .category-bubble.active {
+            transform: scale(1.05);
+            border: 2px solid white;
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        /* ===== VIDEO GRID ===== */
+        #video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: var(--grid-gap) 40px;
+            padding: 40px 0 60px;
+        }
+        
+        .video-card {
+            background: var(--card-gradient);
+            padding: 10px;
+            border-radius: 16px;
+            border: 1px solid transparent;
+            box-shadow: var(--shadow-sm);
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+        
+        .video-card:hover {
+            transform: translateY(-8px);
+            box-shadow: var(--shadow-md);
+            border-color: var(--card-border-hover);
+        }
+        
+        .thumbnail-container {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            background: #eee;
+            margin-bottom: 14px;
+        }
+        
+        .thumbnail {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.5s ease;
+        }
+        
+        .video-card:hover .thumbnail {
+            transform: scale(1.05);
+        }
+        
+        .duration-badge {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: linear-gradient(135deg, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.6));
+            backdrop-filter: blur(4px);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        
+        .video-meta {
+            display: flex;
+            gap: 14px;
+        }
+        
+        .channel-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            border: 2px solid var(--white);
+            box-shadow: var(--shadow-sm);
+        }
+        
+        .video-info {
+            flex: 1;
+        }
+        
+        .video-title {
+            font-size: 16px;
+            font-weight: 600;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            color: var(--text-main);
+            margin-bottom: 4px;
+        }
+        
+        .channel-name {
+            font-size: 13px;
+            color: var(--text-light);
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+        
+        .stats {
+            font-size: 13px;
+            color: var(--text-light);
+        }
+        
+        /* ===== WATCH PAGE ===== */
+        #watch-page {
+            position: fixed;
+            top: var(--header-h);
+            left: 0;
+            width: 100%;
+            height: calc(100vh - var(--header-h));
+            background: var(--bg-body);
+            overflow-y: auto;
+            display: none;
+            z-index: 1100;
+        }
+        
+        .watch-container {
+            max-width: var(--max-content-w);
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+        
+        .back-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-light);
+            font-weight: 600;
+            margin-bottom: 15px;
+            cursor: pointer;
+            transition: color 0.2s ease;
+        }
+        
+        .back-btn:hover {
+            color: var(--primary);
+        }
+        
+        .video-player {
+            width: 100%;
+            aspect-ratio: 16/9;
+            border-radius: 20px;
+            background: black;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+            overflow: hidden;
+        }
+        
+        .player-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        
+        .video-info-section {
+            max-width: 800px;
+            margin-top: 24px;
+        }
+        
+        .video-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--black);
+            margin-bottom: 10px;
+        }
+        
+        .video-meta {
+            font-size: 14px;
+            color: var(--text-light);
+            margin-bottom: 16px;
+        }
+        
+        .channel-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        
+        .channel-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            border: 2px solid var(--white);
+            box-shadow: var(--shadow-sm);
+        }
+        
+        .channel-details {
+            flex: 1;
+        }
+        
+        .channel-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+        
+        .sub-count {
+            font-size: 13px;
+            color: var(--text-light);
+        }
+        
+        .subscribe-btn {
+            background: var(--black);
+            color: var(--bg-body);
+            padding: 0 24px;
+            height: 44px;
+            border-radius: 30px;
+            font-weight: 600;
+            font-size: 14px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+            transition: all 0.2s ease;
+        }
+        
+        .subscribe-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        .subscribe-btn.subscribed {
+            background: var(--secondary);
+            color: var(--primary-dark);
+            box-shadow: none;
+            border: 1px solid var(--border);
+        }
+        
+        .action-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 12px;
+        }
+        
+        .action-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--secondary);
+            padding: 0 16px;
+            height: 44px;
+            border-radius: 22px;
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text-main);
+            transition: all 0.2s ease;
+        }
+        
+        .action-btn:hover {
+            background: var(--primary);
+            color: white;
+            transform: translateY(-2px);
+        }
+        
+        .action-btn.active {
+            background: linear-gradient(135deg, #3ea6ff, #065fd4);
+            color: white;
+            border: 1px solid var(--white);
+        }
+        
+        .description-box {
+            background: var(--secondary);
+            padding: 20px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            cursor: pointer;
+        }
+        
+        .description-meta {
+            font-weight: 600;
+            color: var(--black);
+            margin-bottom: 8px;
+        }
+        
+        .description-text {
+            color: var(--text-light);
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+        
+        /* ===== COMMENTS SECTION ===== */
+        .comments-section {
+            max-width: 800px;
+            margin-top: 30px;
+        }
+        
+        .comments-header {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 20px;
+        }
+        
+        .comment-input-area {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .comment-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+        }
+        
+        .comment-input-container {
+            flex: 1;
+        }
+        
+        .comment-input {
+            width: 100%;
+            border: none;
+            border-bottom: 1px solid #ddd;
+            padding: 8px 0;
+            font-size: 15px;
+            background: transparent;
+            transition: border-color 0.2s ease;
+        }
+        
+        .comment-input:focus {
+            border-color: var(--primary);
+        }
+        
+        .comment-btn {
+            background: var(--primary);
+            color: white;
+            padding: 8px 24px;
+            border-radius: 20px;
+            font-weight: 600;
+            margin-top: 12px;
+            transition: background 0.2s ease;
+        }
+        
+        .comment-btn:hover {
+            background: var(--primary-dark);
+        }
+        
+        .comments-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .comment-item {
+            display: flex;
+            gap: 16px;
+        }
+        
+        .comment-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--accent-purple);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+        }
+        
+        .comment-content {
+            flex: 1;
+        }
+        
+        .comment-meta {
+            font-size: 13px;
+            color: var(--text-light);
+            margin-bottom: 4px;
+        }
+        
+        .comment-text {
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--text-main);
+        }
+        
+        /* ===== STUDIO PAGE ===== */
+        #studio-page {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh;
+            background: var(--studio-bg);
+            z-index: 1100;
+            display: none;
+            overflow: hidden;
+        }
+        
+        .studio-container {
+            display: flex;
+            height: 100%;
+        }
+        
+        .studio-nav {
+            width: 250px;
+            height: 100%;
+            background: var(--white);
+            border-right: 1px solid var(--border);
+            padding: 40px 0;
+        }
+        
+        .studio-main {
+            flex: 1;
+            overflow-y: auto;
+            padding: 40px;
+        }
+        
+        .studio-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        .studio-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--black);
+        }
+        
+        .view-analytics-btn {
+            background: var(--primary);
+            color: white;
+            padding: 8px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        
+        .view-analytics-btn:hover {
+            background: var(--primary-dark);
+        }
+        
+        .studio-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.2s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+        }
+        
+        .stat-card:nth-child(1) {
+            background: linear-gradient(135deg, #3ea6ff, #065fd4);
+        }
+        
+        .stat-card:nth-child(2) {
+            background: linear-gradient(135deg, #ff8800, #ff4e45);
+        }
+        
+        .stat-card:nth-child(3) {
+            background: linear-gradient(135deg, #00c851, #007e33);
+        }
+        
+        .stat-value {
+            font-size: 36px;
+            font-weight: 700;
+            color: white;
+            margin: 10px 0;
+        }
+        
+        .stat-label {
+            color: rgba(255, 255, 255, 0.9);
+            font-weight: 500;
+        }
+        
+        .studio-table-container {
+            background: var(--white);
+            padding: 28px;
+            border-radius: 16px;
+            box-shadow: var(--shadow-sm);
+        }
+        
+        .studio-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0 8px;
+        }
+        
+        .studio-table th {
+            text-align: left;
+            color: var(--text-light);
+            font-size: 12px;
+            font-weight: 600;
+            padding: 10px 15px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .studio-table td {
+            background: var(--secondary);
+            padding: 14px 15px;
+            font-size: 14px;
+            vertical-align: middle;
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .studio-table tr:first-child td:first-child {
+            border-top-left-radius: 8px;
+            border-bottom-left-radius: 8px;
+        }
+        
+        .studio-table tr:first-child td:last-child {
+            border-top-right-radius: 8px;
+            border-bottom-right-radius: 8px;
+        }
+        
+        .studio-table tr:hover td {
+            background: var(--studio-bg);
+        }
+        
+        .video-cell {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .video-thumb {
+            width: 100px;
+            height: 56px;
+            border-radius: 8px;
+            object-fit: cover;
+        }
+        
+        .video-info {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .video-title {
+            font-weight: 600;
+            color: var(--text-main);
+        }
+        
+        .video-duration {
+            font-size: 12px;
+            color: var(--text-light);
+        }
+        
+        .action-icons {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .action-icon {
+            padding: 8px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .action-icon:hover {
+            background: rgba(0, 0, 0, 0.05);
+            transform: scale(1.1);
+        }
+        
+        .action-icon.analytics {
+            color: var(--accent-green);
+        }
+        
+        .action-icon.edit {
+            color: var(--accent-purple);
+        }
+        
+        .action-icon.delete {
+            color: var(--accent-red);
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 30px;
+            color: var(--text-light);
+            font-style: italic;
+        }
+        
+        /* ===== MODALS ===== */
+        .modal-wrap {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            display: none;
+        }
+        
+        .modal {
+            background: var(--white);
+            border-radius: 20px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 500px;
+            padding: 32px;
+            position: relative;
+        }
+        
+        .close-modal {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 24px;
+            color: var(--text-light);
+            cursor: pointer;
+        }
+        
+        .modal-title {
+            font-size: 24px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        
+        .auth-toggle {
+            text-align: center;
+            margin-top: 20px;
+            color: var(--primary);
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .google-login {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            color: var(--text-main);
+            margin-top: 15px;
+            transition: background 0.2s ease;
+        }
+        
+        .google-login:hover {
+            background: var(--secondary);
+        }
+        
+        .form-group {
+            margin-bottom: 18px;
+        }
+        
+        .form-label {
+            display: block;
+            font-size: 13px;
+            color: var(--text-light);
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--secondary);
+            font-size: 14px;
+        }
+        
+        .form-input:focus {
+            border-color: var(--primary);
+            background: var(--white);
+            box-shadow: 0 0 0 3px rgba(62, 166, 255, 0.15);
+        }
+        
+        .form-submit {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #3ea6ff, #065fd4);
+            color: white;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            margin-top: 10px;
+        }
+        
+        /* ===== ANALYTICS MODAL ===== */
+        #analytics-modal {
+            max-width: 800px;
+        }
+        
+        .analytics-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+        
+        .analytics-title {
+            font-size: 24px;
+            font-weight: 700;
+        }
+        
+        .analytics-video-title {
+            font-size: 16px;
+            color: var(--text-light);
+            margin-top: 8px;
+        }
+        
+        .chart-container {
+            background: var(--white);
+            padding: 15px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            height: 280px;
+            margin-bottom: 30px;
+        }
+        
+        .chart-title {
+            font-size: 18px;
+            color: #444;
+            margin-bottom: 15px;
+        }
+        
+        /* ===== RESPONSIVE STYLES ===== */
+        @media (max-width: 1024px) {
+            .navbar-center {
+                display: none;
+            }
+            
+            .mobile-search-btn {
+                display: flex;
+            }
+            
+            #sidebar {
+                width: 260px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            :root {
+                --sidebar-w: 100%;
+            }
+            
+            .hamburger-btn {
+                display: flex;
+            }
+            
+            .upload-btn {
+                display: flex;
+            }
+            
+            #category-bubbles {
+                gap: 8px;
+            }
+            
+            .category-bubble {
+                padding: 6px 15px;
+                font-size: 13px;
+            }
+            
+            #video-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .watch-container {
+                padding: 20px;
+            }
+            
+            .studio-nav {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid var(--border);
+            }
+            
+            .studio-main {
+                padding: 20px;
+            }
+            
+            .studio-stats {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .logo {
+                gap: 4px;
+            }
+            
+            .logo-text {
+                display: none;
+            }
+            
+            .category-bubble {
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+            
+            .video-title {
+                font-size: 14px;
+            }
+            
+            .channel-name {
+                font-size: 12px;
+            }
+            
+            .stats {
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navbar -->
+    <nav id="navbar">
+        <div class="navbar-left">
+            <button class="hamburger-btn" id="hamburger-btn">
+                <span class="material-symbols-rounded">menu</span>
+            </button>
+            <a href="#" class="logo">
+                <span class="logo-icon material-symbols-rounded">play_circle</span>
+                <span class="logo-text">JavaGoat</span>
+            </a>
+        </div>
+        
+        <div class="navbar-center">
+            <div class="search-container">
+                <input type="text" class="search-input" id="search-input" placeholder="Search">
+                <div class="search-btn" id="search-btn">
+                    <span class="material-symbols-rounded">search</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="navbar-right">
+            <button class="mobile-search-btn" id="mobile-search-btn">
+                <span class="material-symbols-rounded">search</span>
+            </button>
+            <button class="upload-btn" id="upload-btn">
+                <span class="material-symbols-rounded">video_call</span>
+            </button>
+            <button class="notification-btn" id="notification-btn">
+                <span class="material-symbols-rounded">notifications</span>
+                <span id="notification-badge"></span>
+            </button>
+            <div class="notification-dropdown" id="notification-dropdown">
+                <div class="notif-header">Recent Uploads</div>
+                <div class="notif-item">
+                    <div class="notif-thumb"></div>
+                    <div class="notif-info">
+                        <div class="notif-title">Java 21 New Features Explained</div>
+                        <div class="notif-uploader">Java Master</div>
+                    </div>
+                </div>
+                <div class="notif-item">
+                    <div class="notif-thumb"></div>
+                    <div class="notif-info">
+                        <div class="notif-title">Building REST APIs with Spring Boot</div>
+                        <div class="notif-uploader">Spring Guru</div>
+                    </div>
+                </div>
+                <div class="notif-item">
+                    <div class="notif-thumb"></div>
+                    <div class="notif-info">
+                        <div class="notif-title">JavaScript Promises Made Simple</div>
+                        <div class="notif-uploader">Web Dev Simplified</div>
+                    </div>
+                </div>
+                <div class="notif-item">
+                    <div class="notif-thumb"></div>
+                    <div class="notif-info">
+                        <div class="notif-title">Python Data Science Tutorial</div>
+                        <div class="notif-uploader">Data School</div>
+                    </div>
+                </div>
+                <div class="notif-item">
+                    <div class="notif-thumb"></div>
+                    <div class="notif-info">
+                        <div class="notif-title">Game Development with Unity</div>
+                        <div class="notif-uploader">Game Dev Academy</div>
+                    </div>
+                </div>
+            </div>
+            <button class="auth-btn" id="auth-btn">Sign in</button>
+            <div class="user-avatar" id="user-avatar"></div>
+        </div>
+    </nav>
+    
+    <!-- Sidebar -->
+    <aside id="sidebar">
+        <div class="sidebar-menu">
+            <div class="menu-item active">
+                <span class="material-symbols-rounded" style="color: #ff4e45;">home</span>
+                <span>Home</span>
+            </div>
+            <div class="menu-item" id="studio-link">
+                <span class="material-symbols-rounded" style="color: #ffbb33;">bar_chart</span>
+                <span>Studio</span>
+            </div>
+            <div class="menu-item">
+                <span class="material-symbols-rounded" style="color: #a855f7;">history</span>
+                <span>History</span>
+            </div>
+            <div class="menu-item">
+                <span class="material-symbols-rounded" style="color: #065fd4;">thumb_up</span>
+                <span>Liked Videos</span>
+            </div>
+        </div>
+        
+        <div class="menu-divider"></div>
+        
+        <div class="sidebar-section">
+            <div class="section-header">SUBSCRIPTIONS</div>
+            <div id="subscriptions-list">
+                <div class="empty-subscription">Sign in to see subscriptions</div>
+            </div>
+        </div>
+        
+        <div class="sidebar-section" id="sign-out-section" style="margin-top: auto; padding: 0 15px 20px;">
+            <div class="menu-item" id="sign-out-btn">
+                <span class="material-symbols-rounded" style="color: #606060;">logout</span>
+                <span>Sign Out</span>
+            </div>
+        </div>
+    </aside>
+    
+    <!-- Category Bubbles -->
+    <div id="category-bubbles-container">
+        <div class="container">
+            <div id="category-bubbles"></div>
+        </div>
+    </div>
+    
+    <!-- Home Page -->
+    <main id="home-page" class="container">
+        <div id="video-grid">
+            <!-- Video cards will be populated by JavaScript -->
+        </div>
+    </main>
+    
+    <!-- Watch Page -->
+    <section id="watch-page">
+        <div class="watch-container">
+            <div class="back-btn" id="back-btn">
+                <span class="material-symbols-rounded">arrow_back</span>
+                <span>Back to Home</span>
+            </div>
+            
+            <div class="video-player">
+                <iframe class="player-iframe" id="player-iframe" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+            </div>
+            
+            <div class="video-info-section">
+                <h1 class="video-title" id="video-title"></h1>
+                <div class="video-meta" id="video-meta"></div>
+                
+                <div class="channel-info">
+                    <div class="channel-avatar" id="channel-avatar"></div>
+                    <div class="channel-details">
+                        <div class="channel-name" id="channel-name"></div>
+                        <div class="sub-count">0 subscribers</div>
+                    </div>
+                    <button class="subscribe-btn" id="subscribe-btn">Subscribe</button>
+                </div>
+                
+                <div class="action-bar">
+                    <div class="action-buttons">
+                        <button class="action-btn" id="like-btn">
+                            <span class="material-symbols-rounded">thumb_up_off_alt</span> 0
+                        </button>
+                        <button class="action-btn">
+                            <span class="material-symbols-rounded">thumb_down_off_alt</span> Dislike
+                        </button>
+                        <button class="action-btn">
+                            <span class="material-symbols-rounded">share</span> Share
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="description-box">
+                    <div class="description-meta" id="views-count">0 views • Today</div>
+                    <div class="description-text" id="description-text"></div>
+                </div>
+            </div>
+            
+            <div class="comments-section">
+                <div class="comments-header" id="comments-count">Comments</div>
+                
+                <div class="comment-input-area">
+                    <div class="comment-avatar">U</div>
+                    <div class="comment-input-container">
+                        <input type="text" class="comment-input" id="comment-input" placeholder="Add a public comment...">
+                        <button class="comment-btn" id="comment-btn">Comment</button>
+                    </div>
+                </div>
+                
+                <div class="comments-list" id="comments-list">
+                    <div class="empty-state">No comments yet.</div>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Studio Page -->
+    <section id="studio-page">
+        <div class="studio-container">
+            <nav class="studio-nav">
+                <div class="sidebar-menu">
+                    <div class="menu-item active" id="studio-dashboard">
+                        <span class="material-symbols-rounded">dashboard</span>
+                        <span>Dashboard</span>
+                    </div>
+                    <div class="menu-item" id="studio-settings">
+                        <span class="material-symbols-rounded">settings</span>
+                        <span>Settings</span>
+                    </div>
+                    <div class="menu-item" id="studio-exit">
+                        <span class="material-symbols-rounded">arrow_back</span>
+                        <span>Exit Studio</span>
+                    </div>
+                </div>
+            </nav>
+            
+            <main class="studio-main">
+                <div class="studio-header">
+                    <h1 class="studio-title">Channel Dashboard</h1>
+                    <button class="view-analytics-btn" id="view-analytics">View Channel Analytics</button>
+                </div>
+                
+                <div class="studio-stats" id="studio-stats">
+                    <div class="stat-card">
+                        <h3 class="stat-label">Total Videos</h3>
+                        <div class="stat-value" id="total-videos-count">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3 class="stat-label">Total Views</h3>
+                        <div class="stat-value" id="total-views-count">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3 class="stat-label">Engagement Rate</h3>
+                        <div class="stat-value">0%</div>
+                    </div>
+                </div>
+                
+                <div class="studio-table-container">
+                    <table class="studio-table">
+                        <thead>
+                            <tr>
+                                <th>Video</th>
+                                <th>Date</th>
+                                <th>Views</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="studio-videos-table">
+                            <!-- Video rows will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </main>
+        </div>
+    </section>
+    
+    <!-- Auth Modal -->
+    <div class="modal-wrap" id="auth-modal">
+        <div class="modal">
+            <span class="close-modal material-symbols-rounded" onclick="closeModals()">close</span>
+            <h2 class="modal-title" id="auth-modal-title">Sign In</h2>
+            
+            <div class="form-group">
+                <label class="form-label">Email</label>
+                <input type="email" class="form-input" id="auth-email" placeholder="your@email.com">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Password</label>
+                <input type="password" class="form-input" id="auth-password" placeholder="••••••••">
+            </div>
+            
+            <button class="form-submit" id="auth-submit">Sign In</button>
+            
+            <div class="google-login" id="google-login">
+                <span class="material-symbols-rounded">google</span>
+                <span>Sign in with Google</span>
+            </div>
+            
+            <div class="auth-toggle" id="auth-toggle">Create an account</div>
+        </div>
+    </div>
+    
+    <!-- Upload Modal -->
+    <div class="modal-wrap" id="upload-modal">
+        <div class="modal">
+            <span class="close-modal material-symbols-rounded" onclick="closeModals()">close</span>
+            <h2 class="modal-title">Upload Video</h2>
+            
+            <input type="hidden" id="video-id">
+            
+            <div class="form-group">
+                <label class="form-label">Title</label>
+                <input type="text" class="form-input" id="video-title" placeholder="Video Title">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Thumbnail URL</label>
+                <input type="text" class="form-input" id="thumbnail-url" placeholder="https://...">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Video URL (YouTube/Drive)</label>
+                <input type="text" class="form-input" id="video-url" placeholder="Paste link here...">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Duration</label>
+                <input type="text" class="form-input" id="video-duration" placeholder="MM:SS">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Description</label>
+                <textarea class="form-input" id="video-description" rows="3" placeholder="Video description..."></textarea>
+            </div>
+            
+            <button class="form-submit" id="upload-submit">Save Video</button>
+        </div>
+    </div>
+    
+    <!-- Analytics Modal -->
+    <div class="modal-wrap" id="analytics-modal">
+        <div class="modal">
+            <span class="close-modal material-symbols-rounded" id="close-analytics">close</span>
+            <div class="analytics-header">
+                <div>
+                    <h2 class="analytics-title">Video Analytics</h2>
+                    <div class="analytics-video-title" id="analytics-video-title"></div>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <h3 class="chart-title">Realtime (Last 24 Hours)</h3>
+                <canvas id="realtime-chart"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <h3 class="chart-title">Performance (Total Views)</h3>
+                <canvas id="performance-chart"></canvas>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
